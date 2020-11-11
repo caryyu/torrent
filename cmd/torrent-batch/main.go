@@ -1,0 +1,106 @@
+package main
+
+import (
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/user"
+	"path/filepath"
+
+	"github.com/anacrolix/tagflag"
+	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/util/dirwatch"
+)
+
+var (
+	args = struct {
+		MetainfoDir string `help:"torrent files in this location describe the contents of the mounted filesystem"`
+		DownloadDir string `help:"location to save torrent data"`
+
+		DisableTrackers bool
+		ReadaheadBytes  tagflag.Bytes
+		ListenAddr      *net.TCPAddr
+	}{
+		MetainfoDir: func() string {
+			_user, err := user.Current()
+			if err != nil {
+				log.Fatal(err)
+			}
+			return filepath.Join(_user.HomeDir, ".config/transmission/torrents")
+		}(),
+		ReadaheadBytes: 10 << 20,
+		ListenAddr:     &net.TCPAddr{},
+	}
+)
+
+func main() {
+	os.Exit(mainExitCode())
+}
+
+func mainExitCode() int {
+	tagflag.Parse(&args)
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	cfg := torrent.NewDefaultClientConfig()
+	cfg.DataDir = args.DownloadDir
+	cfg.DisableTrackers = args.DisableTrackers
+	cfg.SetListenAddr(args.ListenAddr.String())
+	client, err := torrent.NewClient(cfg)
+	if err != nil {
+		log.Print(err)
+		return 1
+	}
+	// This is naturally exported via GOPPROF=http.
+	http.DefaultServeMux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+		client.WriteStatus(w)
+	})
+	dw, err := dirwatch.New(args.MetainfoDir)
+	if err != nil {
+		log.Printf("error watching torrent dir: %s", err)
+		return 1
+	}
+
+	// Create a goroutine pool
+	torrents := make(chan *torrent.Torrent, 5)
+	for i := 1; i <= 5; i++ {
+		go func(torrents <-chan *torrent.Torrent) {
+			for t := range torrents {
+				<-t.GotInfo()
+				t.DownloadAll()
+			}
+		}(torrents)
+	}
+
+	for ev := range dw.Events {
+		var t *torrent.Torrent
+		var err error
+		switch ev.Change {
+		case dirwatch.Added:
+			if ev.TorrentFilePath != "" {
+				t, err = client.AddTorrentFromFile(ev.TorrentFilePath)
+				if err != nil {
+					log.Printf("error adding torrent to client: %s", err)
+				}
+			} else if ev.MagnetURI != "" {
+				t, err = client.AddMagnet(ev.MagnetURI)
+				if err != nil {
+					log.Printf("error adding magnet: %s", err)
+				}
+			}
+		case dirwatch.Removed:
+			T, ok := client.Torrent(ev.InfoHash)
+			if !ok {
+				break
+			}
+			T.Drop()
+		}
+
+		if t != nil {
+			go func() {
+				torrents <- t
+			}()
+		}
+	}
+	return 0
+}
