@@ -1254,10 +1254,7 @@ func (cl *Client) dropTorrent(infoHash metainfo.Hash) (err error) {
 
 func (cl *Client) allTorrentsCompleted() bool {
 	for _, t := range cl.torrents {
-		if !t.haveInfo() {
-			return false
-		}
-		if !t.haveAllPieces() {
+		if !t.Completed() {
 			return false
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"os/user"
 	"path/filepath"
 
+	"github.com/anacrolix/envpprof"
 	"github.com/anacrolix/tagflag"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/util/dirwatch"
@@ -40,6 +41,7 @@ func main() {
 
 func mainExitCode() int {
 	tagflag.Parse(&args)
+	defer envpprof.Stop()
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	cfg := torrent.NewDefaultClientConfig()
@@ -96,7 +98,7 @@ func mainExitCode() int {
 			T.Drop()
 		}
 
-		if t != nil {
+		if t != nil && !t.Completed() {
 			go func() {
 				torrents <- t
 			}()

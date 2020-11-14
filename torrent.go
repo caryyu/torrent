@@ -808,6 +808,16 @@ func (t *Torrent) haveAnyPieces() bool {
 	return t._completedPieces.Len() != 0
 }
 
+func (t *Torrent) Completed() bool {
+	if !t.haveInfo() {
+		return false
+	}
+	if !t.haveAllPieces() {
+		return false
+	}
+	return true
+}
+
 func (t *Torrent) haveAllPieces() bool {
 	if !t.haveInfo() {
 		return false
