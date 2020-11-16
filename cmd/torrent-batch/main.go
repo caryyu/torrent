@@ -1,17 +1,20 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/user"
 	"path/filepath"
+	"sort"
 
 	"github.com/anacrolix/envpprof"
 	"github.com/anacrolix/tagflag"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/util/dirwatch"
+	"github.com/dustin/go-humanize"
 )
 
 var (
@@ -56,6 +59,35 @@ func mainExitCode() int {
 	// This is naturally exported via GOPPROF=http.
 	http.DefaultServeMux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		client.WriteStatus(w)
+	})
+	http.DefaultServeMux.HandleFunc("/pretty", func(w http.ResponseWriter, req *http.Request) {
+		torrents := client.Torrents()
+		sort.Slice(torrents, func(i, j int) bool {
+			t1 := torrents[i].InfoHash().HexString()
+			t2 := torrents[j].InfoHash().HexString()
+			return t1 < t2
+		})
+		for _, t := range torrents {
+			var completedPieces, partialPieces int
+			psrs := t.PieceStateRuns()
+			for _, r := range psrs {
+				if r.Complete {
+					completedPieces += r.Length
+				}
+				if r.Partial {
+					partialPieces += r.Length
+				}
+			}
+			fmt.Fprintf(w,
+				"downloading %q: %s/%s, %d/%d pieces completed (%d partial)\n",
+				t.Name(),
+				humanize.Bytes(uint64(t.BytesCompleted())),
+				humanize.Bytes(uint64(t.Length())),
+				completedPieces,
+				t.NumPieces(),
+				partialPieces,
+			)
+		}
 	})
 	dw, err := dirwatch.New(args.MetainfoDir)
 	if err != nil {
