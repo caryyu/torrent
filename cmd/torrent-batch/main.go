@@ -95,17 +95,6 @@ func mainExitCode() int {
 		return 1
 	}
 
-	// Create a goroutine pool
-	torrents := make(chan *torrent.Torrent, 5)
-	for i := 1; i <= 5; i++ {
-		go func(torrents <-chan *torrent.Torrent) {
-			for t := range torrents {
-				<-t.GotInfo()
-				t.DownloadAll()
-			}
-		}(torrents)
-	}
-
 	for ev := range dw.Events {
 		var t *torrent.Torrent
 		var err error
@@ -132,7 +121,8 @@ func mainExitCode() int {
 
 		if t != nil && !t.Completed() {
 			go func() {
-				torrents <- t
+				<-t.GotInfo()
+				t.DownloadAll()
 			}()
 		}
 	}
